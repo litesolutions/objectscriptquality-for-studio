@@ -20,7 +20,7 @@ ClassMethod Name(InternalName As %String) As %String [ Private ]
 }
 
 Method OnAfterCompile(InternalName As %String) As %Status
-{   
+{
     set tSC = ##super(InternalName)
     if $$$ISOK(tSC) {
         set tSC = ..SonarLint(InternalName)
@@ -59,12 +59,14 @@ Method SonarLint(InternalName As %String) As %Status
     quit $$$OK
 }
 
-Classmethod SonarLintJob(InternalName As %String, ResourceName As %String = "", forStudio As %Boolean = 0)
+ClassMethod SonarLintJob(InternalName As %String, ResourceName As %String = "", forStudio As %Boolean = 0)
 {
 #define addLine(%text) if ResourceName'="" { do $system.Event.Signal(ResourceName, %text) } else { write !,%text}
+
 	set ext=$zcvt($p(InternalName, ".", *),"l")
 	if ext'="cls" quit $$$OK
-	set className=$p(InternalName, ".", 1, *-1)_".cls"
+	set className=$p(InternalName, ".", 1, *-1)
+	set classFileName = className _ ".cls"
 
     set binPath=$system.Util.BinaryDirectory()_"/sonarlint/bin/"
     set sonarlint=##class(%File).NormalizeFilename("sonarlint", binPath)
@@ -74,7 +76,7 @@ Classmethod SonarLintJob(InternalName As %String, ResourceName As %String = "", 
     	quit $$$ERROR(5001, "")
     }
     set tempDir=##class(%File).NormalizeDirectory(tempDir)
-    set fileName=##class(%File).NormalizeFilename(className, tempDir)
+    set fileName=##class(%File).NormalizeFilename(classFileName, tempDir)
     
     set tSC=##class(%Compiler.UDL.TextServices).GetTextAsFile(, className, fileName)
     if $$$ISERR(tSC) quit tSC
@@ -86,15 +88,17 @@ Classmethod SonarLintJob(InternalName As %String, ResourceName As %String = "", 
     set cmd=cmd_" -D sqca.workDir="_tempDir_" "
     
     set cmd=cmd_" -X "
-        
-    set reportFile=tempDir_"sonarReport.xml"
+    
+    set tempSonarDir = ##class(%File).NormalizeDirectory(".sonarlint", tempDir)
+    do ##class(%File).CreateDirectory(tempSonarDir)
+    set reportFile=##class(%File).NormalizeFilename("sonarReport.xml", tempSonarDir)
     set cmd=cmd_" --xml-report "_reportFile
 
-    set logFile=tempDir_"sonarlint.log"
+    set logFile=tempSonarDir_"sonarlint.log"
     set cmd=cmd_" > "_logFile
     
     set sc=$zf(-1, cmd)
-
+    
     set pat=##class(%Regex.Matcher).%New("^(\w+): ")
     if ##class(%File).Exists(logFile) {
     	set fs=##class(%Stream.FileCharacter).%New()
@@ -108,13 +112,13 @@ Classmethod SonarLintJob(InternalName As %String, ResourceName As %String = "", 
     		$$$addLine(line)
     	}
     }
- 
+
     set severityList=$lb("blocker","critical","major","minor","info")
 	do {
 		set tSC=##class(%XML.XPATH.Document).CreateFromFile(reportFile,.tDoc)
 		If $$$ISERR(tSC) Quit
 		
-		set tSC=tDoc.EvaluateExpression("/sonarlintreport/files/file[@name="""_className_"""]/issues", "issue", .tResults)
+		set tSC=tDoc.EvaluateExpression("/sonarlintreport/files/file[@name="""_classFileName_"""]/issues", "issue", .tResults)
 		If $$$ISERR(tSC) Quit
 		
 		for i=1:1:tResults.Count() {
@@ -166,15 +170,14 @@ Classmethod SonarLintJob(InternalName As %String, ResourceName As %String = "", 
 					set line=$order(issues(severityLevel, key, "lines", line), 1, offset)
 					quit:line=""
 					
-					$$$addLine(className_"(+"_line_"): "_$get(linesOfClass(line)))
+					$$$addLine(classFileName_"(+"_line_"): "_$get(linesOfClass(line)))
 				}
 			}
 		}
 	}
-	
-	
+		
 	set tSC=##class(%File).RemoveDirectoryTree(tempDir)
- 
- }
+	quit $$$OK
+}
 
 }
