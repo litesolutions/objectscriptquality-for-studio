@@ -34,3 +34,19 @@ the plugin on Caché Studio.
 
 - Now, compile any file from your namespace. In the log panel you will see the results 
 of the source analysis for that file.
+
+## Connected mode
+The plugin can be configured to use Connected mode. In this case, rules will be synchronized from your SonarQube server.
+```
+Set ^SonarLint("url")="http://sonarqube.your.org:9000"
+Set ^SonarLint("projectKey")="ProjectName"
+```
+Then you have to specify either token
+```
+Set ^SonarLint("token")="yoursonarqubetoken"
+```
+ or login/password
+```
+Set ^SonarLint("login")="login"
+Set ^SonarLint("password")="password"
+```

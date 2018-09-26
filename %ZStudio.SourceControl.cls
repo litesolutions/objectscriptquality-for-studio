@@ -21,6 +21,7 @@ ClassMethod Name(InternalName As %String) As %String [ Private ]
 
 Method OnAfterCompile(InternalName As %String) As %Status
 {
+   
     set tSC = ##super(InternalName)
     if $$$ISOK(tSC) {
         set tSC = ..SonarLint(InternalName)
@@ -80,103 +81,160 @@ ClassMethod SonarLintJob(InternalName As %String, ResourceName As %String = "", 
     
     set tSC=##class(%Compiler.UDL.TextServices).GetTextAsFile(, className, fileName)
     if $$$ISERR(tSC) quit tSC
-    
-    set cmd="cd "_tempDir_" && " 
-    set cmd=cmd_sonarlint
-    if $zversion(1)=1 set cmd=cmd_".bat"
-    
-    set cmd=cmd_" -D sqca.workDir="_tempDir_" "
-    
-    set cmd=cmd_" -X "
-    
-    set tempSonarDir = ##class(%File).NormalizeDirectory(".sonarlint", tempDir)
-    do ##class(%File).CreateDirectory(tempSonarDir)
-    set reportFile=##class(%File).NormalizeFilename("sonarReport.xml", tempSonarDir)
-    set cmd=cmd_" --xml-report "_reportFile
+	    
+	try {
+	    set cmd="cd "_tempDir_" && " 
+	    set cmd=cmd_sonarlint
+	    set opts=""
+	    if $zversion(1)=2 set cmd=cmd_".bat"
+	    
+	    set cmd=cmd_" -X -e "
 
-    set logFile=tempSonarDir_"sonarlint.log"
-    set cmd=cmd_" > "_logFile
-    
-    set sc=$zf(-1, cmd)
-    
-    set pat=##class(%Regex.Matcher).%New("^(\w+): ")
-    if ##class(%File).Exists(logFile) {
-    	set fs=##class(%Stream.FileCharacter).%New()
-    	set fs.Filename=logFile
-    	while 'fs.AtEnd {
-    		set line=fs.ReadLine()
-	    	set pat.Text=line
-	    	if ('pat.Locate())||(pat.Group(1)'="ERROR") {
-	    		continue
+	    set tempSonarDir = ##class(%File).NormalizeDirectory(".sonarlint", tempDir)
+	    do ##class(%File).CreateDirectory(tempSonarDir)
+
+	    if ($d(^SonarLint("serverId")))&&($d(^SonarLint("projectKey"))) {
+	    	set serverId = $g(^SonarLint("serverId"))
+	    	set projectKey = $g(^SonarLint("projectKey"))
+	    	set url = $g(^SonarLint("url"))
+	    	set token = $g(^SonarLint("token"))
+	    	set login = $g(^SonarLint("login"))
+	    	set password = $g(^SonarLint("password"))
+	    	if token'="" {
+		    	set auth="""token"":"""_token_""""
+	    	} else {
+		    	set auth="""login"":"""_login_""",""password"":"""_password_""""
 	    	}
-    		$$$addLine(line)
-    	}
-    }
 
-    set severityList=$lb("blocker","critical","major","minor","info")
-	do {
-		set tSC=##class(%XML.XPATH.Document).CreateFromFile(reportFile,.tDoc)
-		If $$$ISERR(tSC) Quit
-		
-		set tSC=tDoc.EvaluateExpression("/sonarlintreport/files/file[@name="""_classFileName_"""]/issues", "issue", .tResults)
-		If $$$ISERR(tSC) Quit
-		
-		for i=1:1:tResults.Count() {
-			set tRes=tResults.GetAt(i)
-			
-			while tRes.Read() {
-				set (severity,key,name,line)=""
-				if tRes.NodeType="element" {
-					if tRes.MoveToAttributeName("severity") { set severity=tRes.Value }
-					if tRes.MoveToAttributeName("key") { set key=tRes.Value }
-					if tRes.MoveToAttributeName("name") { set name=tRes.Value }
-					if tRes.MoveToAttributeName("line") { set line=tRes.Value }
-					if tRes.MoveToAttributeName("offset") { set offset=tRes.Value }
-					
-					set severityLevel=$lf(severityList, severity)
-					if $i(issues(severityLevel)),$i(issues(severityLevel,key))
-					set issues(severityLevel,key,"name")=name
-					set issues(severityLevel,key,"lines",line)=offset
-				}
-			}
+	    	set configFile=##class(%File).NormalizeFilename("sonarlint.json", tempDir)
+	    	set config = ##class(%Stream.FileCharacter).%New()
+	    	set config.Filename = configFile
+	    	do config.WriteLine("{""serverId"":"""_serverId_""", ""projectKey"": """_projectKey_"""}")
+	    	do config.%Save()
+	    	set cmd=cmd_" -u "
+
+			set globalConfigPath = ##class(%File).NormalizeDirectory("conf", tempSonarDir)
+	    	do ##class(%File).CreateDirectoryChain(globalConfigPath)
+	    	set globalConfigFile = ##class(%File).NormalizeFilename("global.json", globalConfigPath)
+	    	set globalConfig = ##class(%Stream.FileCharacter).%New()
+	    	set globalConfig.Filename = globalConfigFile
+	    	do globalConfig.WriteLine("{""servers"":[{")
+	    	do globalConfig.WriteLine("""id"":"""_serverId_""",")
+	    	do globalConfig.WriteLine("""url"":"""_url_""",")
+	    	do globalConfig.WriteLine(auth_"}]}")
+	    	do globalConfig.%Save()
+	    	
+	    	set opts=opts_"-Duser.home="_tempDir
+	    }
+
+	    set reportFile=##class(%File).NormalizeFilename("sonarReport.xml", tempSonarDir)
+	    set cmd=cmd_" --xml-report "_reportFile
+
+		if $zversion(1)=2 {
+			set cmd = "set SONARLINT_OPTS="_opts_"&& "_cmd_""
+		} else {
+			set cmd = "export SONARLINT_OPTS="_opts_" && "
 		}
 		
-	} while (0)
-	If $$$ISERR(tSC) {
-		$$$addLine($system.Status.GetErrorText(tSC))
-	}
-	
-	set tSC=##class(%Compiler.UDL.TextServices).GetTextAsArray(,className,.linesOfClass)
-	
-	set severityLevel=""
-	for {
-		set severityLevel=$order(issues(severityLevel), 1, count)
-		quit:severityLevel=""
+		set logFile=tempSonarDir_"sonarlint.log"
+	    set cmd=cmd_" > "_logFile_" 2>&1"
+	    
+	    set sc=$zf(-1, cmd)
+	    
+	    if sc'=0 {
+	    	set fs=##class(%Stream.FileCharacter).%New()
+	    	set fs.Filename=logFile
+	    	while 'fs.AtEnd {
+		    	set line=fs.ReadLine()
+		    	$$$addLine(line)
+	    	}
+	    	quit
+	    }
+	    
+	    set pat=##class(%Regex.Matcher).%New("^(\w+): ")
+	    if ##class(%File).Exists(logFile) {
+	    	set fs=##class(%Stream.FileCharacter).%New()
+	    	set fs.Filename=logFile
+	    	while 'fs.AtEnd {
+	    		set line=fs.ReadLine()
+	    		write !,line
+		    	set pat.Text=line
+		    	if ('pat.Locate())||(pat.Group(1)'="ERROR") {
+		    		continue
+		    	}
+	    		$$$addLine(line)
+	    	}
+	    	do fs.Clear()
+	    }
+
+	    set severityList=$lb("blocker","critical","major","minor","info")
+		do {
+			set tSC=##class(%XML.XPATH.Document).CreateFromFile(reportFile,.tDoc)
+			If $$$ISERR(tSC) Quit
+			
+			set tSC=tDoc.EvaluateExpression("/sonarlintreport/files/file[@name="""_classFileName_"""]/issues", "issue", .tResults)
+			If $$$ISERR(tSC) Quit
+			
+			for i=1:1:tResults.Count() {
+				set tRes=tResults.GetAt(i)
+				
+				while tRes.Read() {
+					set (severity,key,name,line)=""
+					if tRes.NodeType="element" {
+						if tRes.MoveToAttributeName("severity") { set severity=tRes.Value }
+						if tRes.MoveToAttributeName("key") { set key=tRes.Value }
+						if tRes.MoveToAttributeName("name") { set name=tRes.Value }
+						if tRes.MoveToAttributeName("line") { set line=tRes.Value }
+						if tRes.MoveToAttributeName("offset") { set offset=tRes.Value }
+						
+						set severityLevel=$lf(severityList, severity)
+						if $i(issues(severityLevel)),$i(issues(severityLevel,key))
+						set issues(severityLevel,key,"name")=name
+						set issues(severityLevel,key,"lines",line)=offset
+					}
+				}
+			}
+			
+		} while (0)
+		If $$$ISERR(tSC) {
+			$$$addLine($system.Status.GetErrorText(tSC))
+		}
 		
-		$$$addLine($j(count,5)_" "_$lg(severityList, severityLevel))
+		set tSC=##class(%Compiler.UDL.TextServices).GetTextAsArray(,className,.linesOfClass)
 		
-		set key=""
+		set severityLevel=""
 		for {
-			set key=$o(issues(severityLevel, key), 1, byKeyCount)
-			quit:key=""
+			set severityLevel=$order(issues(severityLevel), 1, count)
+			quit:severityLevel=""
 			
-			set name=issues(severityLevel, key, "name")
+			$$$addLine($j(count,5)_" "_$lg(severityList, severityLevel))
 			
-			$$$addLine($j(byKeyCount,8)_" "_name)
-			
-			if (forStudio) {
-				set line=""
-				for {
-					set line=$order(issues(severityLevel, key, "lines", line), 1, offset)
-					quit:line=""
-					
-					$$$addLine(classFileName_"(+"_line_"): "_$get(linesOfClass(line)))
+			set key=""
+			for {
+				set key=$o(issues(severityLevel, key), 1, byKeyCount)
+				quit:key=""
+				
+				set name=issues(severityLevel, key, "name")
+				
+				$$$addLine($j(byKeyCount,8)_" "_name)
+				
+				if (forStudio) {
+					set line=""
+					for {
+						set line=$order(issues(severityLevel, key, "lines", line), 1, offset)
+						quit:line=""
+						
+						$$$addLine(classFileName_"(+"_line_"): "_$get(linesOfClass(line)))
+					}
 				}
 			}
 		}
+	} catch {
 	}
 		
-	set tSC=##class(%File).RemoveDirectoryTree(tempDir)
+	if '##class(%File).RemoveDirectoryTree(tempDir) {
+		do $system.OBJ.DisplayError()
+	}
 	quit $$$OK
 }
 
