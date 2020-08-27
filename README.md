@@ -5,7 +5,7 @@ A plugin to use sonarlint-cli in Caché Studio, to allow analyze your caché cod
 
 ## Requeriments
 - You need the cachéQuality plugin, which can be downloaded from 
-https://www.cachequality.com/downloads
+https://objectscriptquality.com/downloads
 
 - If you decide to download cachéQuality for Caché Studio, follow the steps 
 described next to the downloaded file. If you download just the cachéQuality plugin,
