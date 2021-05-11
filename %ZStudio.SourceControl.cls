@@ -21,7 +21,6 @@ ClassMethod Name(InternalName As %String) As %String [ Private ]
 
 Method OnAfterCompile(InternalName As %String) As %Status
 {
-   
     set tSC = ##super(InternalName)
     if $$$ISOK(tSC) {
         set tSC = ..SonarLint(InternalName)
@@ -72,7 +71,7 @@ ClassMethod SonarLintJob(InternalName As %String, ResourceName As %String = "", 
     set binPath=$system.Util.BinaryDirectory()_"/sonarlint/bin/"
     set sonarlint=##class(%File).NormalizeFilename("sonarlint", binPath)
 
-    set tempDir=$e(##class(%File).TempFilename("tmp"), 1, *-4)
+    set tempDir=$$$FileTempDir
     if '##class(%File).CreateDirectoryChain(tempDir) {
     	quit $$$ERROR(5001, "")
     }
@@ -83,13 +82,17 @@ ClassMethod SonarLintJob(InternalName As %String, ResourceName As %String = "", 
     if $$$ISERR(tSC) quit tSC
 	    
 	try {
-	    set cmd="cd "_tempDir_" && " 
+		if $zversion(1)=2 {
+			set cmd="cd /D "_tempDir_" && " 
+		} else {
+	    	set cmd="cd "_tempDir_" && " 
+		}
 	    set cmd=cmd_sonarlint
 	    set opts=""
 	    if $zversion(1)=2 set cmd=cmd_".bat"
 	    
 	    set cmd=cmd_" -X -e "
-
+	    
 	    set tempSonarDir = ##class(%File).NormalizeDirectory(".sonarlint", tempDir)
 	    do ##class(%File).CreateDirectory(tempSonarDir)
 
